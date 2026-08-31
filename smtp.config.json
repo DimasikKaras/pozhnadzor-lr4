@@ -1,0 +1,8 @@
+{
+  "host": "smtp.yandex.ru",
+  "port": 465,
+  "secure": true,
+  "user": "Bykov8642@yandex.ru",
+  "pass": "dqabciwhhmekfxdr",
+  "from": "\"ПожНадзор.pro Служба безопасности\" <Bykov8642@yandex.ru>"
+}

@@ -1,0 +1,47 @@
+name: CI Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачиваем код
+        uses: actions/checkout@v4
+
+      - name: Устанавливаем Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Устанавливаем зависимости бэкенда
+        run: |
+          cd backend
+          pip install -r requirements.txt
+          pip install pytest httpx
+
+      - name: Запуск тестов бэкенда
+        run: |
+          cd backend
+          python -m pytest tests/
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачиваем код
+        uses: actions/checkout@v4
+
+      - name: Устанавливаем Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Устанавливаем зависимости фронтенда
+        run: npm install
+
+      - name: Сборка фронтенда (React / Vite Build)
+        run: npm run build

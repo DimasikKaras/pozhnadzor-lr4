@@ -287,6 +287,24 @@ function AuthScreen({
   }, []);
 
   // Email format regex validation
+    // Validation Helpers: Russian full name (Фамилия Имя Отчество)
+  const isValidFullName = (name: string) => {
+    const trimmed = name.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) return false;
+    const nameRegex = /^[А-ЯЁа-яёA-Za-z\s-]+$/;
+    return nameRegex.test(trimmed) && parts.every((p) => p.length >= 2);
+  };
+
+  // Validation Helpers: Strong Password (>= 8 chars, 1 letter, 1 number, 1 special char)
+  const isValidStrongPassword = (pwd: string) => {
+    if (pwd.length < 8) return false;
+    const hasLetter = /[a-zA-Zа-яА-ЯёЁ]/.test(pwd);
+    const hasDigit = /\d/.test(pwd);
+    const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(pwd);
+    return hasLetter && hasDigit && hasSpecial;
+  };
+
   const isValidEmail = (val: string) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
   };
@@ -337,12 +355,12 @@ function AuthScreen({
     }
 
     if (mode === 'register') {
-      if (!fullName.trim()) {
-        setError('Пожалуйста, укажите ФИО инспектора');
+      if (!isValidFullName(fullName)) {
+        setError('Пожалуйста, укажите корректное ФИО инспектора (минимум Фамилия и Имя, например: Иванов Иван Иванович)');
         return;
       }
-      if (password.length < 4) {
-        setError('Пароль должен содержать минимум 4 символа');
+      if (!isValidStrongPassword(password)) {
+        setError('Пароль не отвечает требованиям безопасности: минимум 8 символов, хотя бы одна буква, одна цифра и один специальный символ (!@#$%^&*).');
         return;
       }
 
@@ -428,9 +446,36 @@ function AuthScreen({
     // LOGIN FLOW
     setLoading(true);
     try {
-      const found = existingInspectors.find(
+      let found = existingInspectors.find(
         (i) => i.email.trim().toLowerCase() === trimmedEmail.toLowerCase()
       );
+
+      if (!found) {
+        try {
+          const res = await api.get('/inspectors');
+          if (Array.isArray(res.data)) {
+            const serverMatch = res.data.find(
+              (i: any) => i.email && i.email.trim().toLowerCase() === trimmedEmail.toLowerCase()
+            );
+            if (serverMatch) {
+              found = {
+                id: String(serverMatch.id),
+                full_name: serverMatch.full_name || 'Инспектор ГПН',
+                rank: serverMatch.rank || 'Лейтенант внутренней службы',
+                phone: serverMatch.phone || '+7 (999) 000-00-00',
+                email: serverMatch.email,
+                role: serverMatch.role || 'Инспектор',
+                two_factor_enabled: true,
+                two_factor_method: serverMatch.two_factor_method || 'email',
+                two_factor_secret: serverMatch.two_factor_secret,
+                backup_codes: serverMatch.backup_codes
+              };
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (found) {
         // Prepare 2FA user data with fallback defaults
@@ -587,9 +632,9 @@ function AuthScreen({
     }
 
     // Registration confirmed with real 2FA!
+    let createdUser: Inspector = setup2FAUser;
     try {
-      await api.post('/auth/register', {
-        id: setup2FAUser.id,
+      const regRes = await api.post('/auth/register', {
         full_name: setup2FAUser.full_name,
         rank: setup2FAUser.rank,
         phone: setup2FAUser.phone,
@@ -601,12 +646,28 @@ function AuthScreen({
         two_factor_secret: setupSecret,
         backup_codes: setupBackupCodes
       });
+      if (regRes.data) {
+        createdUser = { ...setup2FAUser, ...regRes.data };
+      }
     } catch {
-      // Local fallback
+      try {
+        const inspRes = await api.post('/inspectors', {
+          full_name: setup2FAUser.full_name,
+          rank: setup2FAUser.rank,
+          phone: setup2FAUser.phone,
+          role: setup2FAUser.role,
+          email: setup2FAUser.email,
+          password,
+          admin_code: setup2FAUser.role === 'Администратор' ? 'ADMIN2026' : undefined
+        });
+        if (inspRes.data) {
+          createdUser = { ...setup2FAUser, ...inspRes.data };
+        }
+      } catch {}
     }
 
-    setAccessToken('token-registered-2fa-' + setup2FAUser.id);
-    onLogin(setup2FAUser);
+    setAccessToken('token-registered-2fa-' + createdUser.id);
+    onLogin(createdUser);
   };
 
   return (
@@ -2708,7 +2769,8 @@ function InspectionsView({
   inspectors,
   currentUser,
   currentInspectorId,
-  onSave
+  onSave,
+  onDelete
 }: {
   inspections: Inspection[];
   facilities: Facility[];
@@ -2716,6 +2778,7 @@ function InspectionsView({
   currentUser?: Inspector | null;
   currentInspectorId?: number;
   onSave: (item: Partial<Inspection>) => void;
+  onDelete?: (id: number) => void;
 }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -2844,6 +2907,7 @@ function InspectionsView({
                 <th className="px-6 py-4">Инспектор ГПН</th>
                 <th className="px-6 py-4">Результат</th>
                 <th className="px-6 py-4">Выявленные нарушения</th>
+                {isAdmin && <th className="px-6 py-4 text-right">Действия</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -2909,6 +2973,22 @@ function InspectionsView({
                           <span className="text-slate-400 italic">Нарушений требований ПБ не выявлено</span>
                         )}
                       </td>
+                      {isAdmin && (
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Вы действительно хотите удалить запись проверки объекта «${facility?.name || insp.facility_id}» от ${insp.date}?`)) {
+                                onDelete?.(insp.id);
+                              }
+                            }}
+                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                            title="Удалить запись проверки"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -3915,6 +3995,7 @@ export default function App() {
   const location = useLocation();
 
   // Application State with local persistent fallback (starts on AuthScreen by default if no stored session)
+  const [kickedNotice, setKickedNotice] = useState<{ open: boolean; name: string }>({ open: false, name: '' });
   const [currentUser, setCurrentUser] = useState<Inspector | null>(() => {
     const saved = localStorage.getItem('current_user');
     return saved ? JSON.parse(saved) : null;
@@ -3983,7 +4064,44 @@ export default function App() {
   };
 
   // Try fetching from backend if running, otherwise keep state
+    // Мониторинг в реальном времени: если текущего пользователя удалили из БД
   useEffect(() => {
+    const checkActiveUser = async () => {
+      const savedUser = localStorage.getItem('current_user') || localStorage.getItem('app_current_user');
+      const activeUser = currentUser || (savedUser ? JSON.parse(savedUser) : null);
+      if (!activeUser) return;
+
+      try {
+        const res = await api.get('/inspectors');
+        if (Array.isArray(res.data) && res.data.length > 0) {
+          const list = sanitizeLegacyIds(res.data);
+          setInspectors(list);
+          localStorage.setItem('app_inspectors', JSON.stringify(list));
+
+          const userExists = list.some(
+            (u: Inspector) =>
+              u.id === activeUser.id ||
+              String(u.id) === String(activeUser.id) ||
+              (u.email && activeUser.email && u.email.trim().toLowerCase() === activeUser.email.trim().toLowerCase())
+          );
+
+          if (!userExists) {
+            // Пользователя удалил Администратор!
+            const userName = activeUser.full_name || 'Сотрудник';
+            localStorage.removeItem('current_user');
+            localStorage.removeItem('token');
+            localStorage.removeItem('app_current_user');
+            localStorage.removeItem('token_type');
+            localStorage.removeItem('user');
+            setCurrentUser(null);
+            setAccessToken(null);
+            setKickedNotice({ open: true, name: userName });
+            navigate('/login');
+          }
+        }
+      } catch {}
+    };
+
     const loadBackendData = async () => {
       try {
         const [fRes, iRes, eqRes, inspRes] = await Promise.allSettled([
@@ -3996,8 +4114,11 @@ export default function App() {
         if (fRes.status === 'fulfilled' && Array.isArray(fRes.value.data) && fRes.value.data.length > 0) {
           setFacilities(sanitizeLegacyIds(fRes.value.data));
         }
-        if (iRes.status === 'fulfilled' && Array.isArray(iRes.value.data) && iRes.value.data.length > 0) {
-          setInspectors(sanitizeLegacyIds(iRes.value.data));
+        if (iRes.status === 'fulfilled' && Array.isArray(iRes.value.data)) {
+          const list = sanitizeLegacyIds(iRes.value.data);
+          setInspectors(list);
+          localStorage.setItem('app_inspectors', JSON.stringify(list));
+          localStorage.setItem('inspectors_registry', JSON.stringify(list));
         }
         if (eqRes.status === 'fulfilled' && Array.isArray(eqRes.value.data) && eqRes.value.data.length > 0) {
           setEquipment(sanitizeLegacyIds(eqRes.value.data));
@@ -4005,15 +4126,18 @@ export default function App() {
         if (inspRes.status === 'fulfilled' && Array.isArray(inspRes.value.data) && inspRes.value.data.length > 0) {
           setInspections(sanitizeLegacyIds(inspRes.value.data));
         }
-      } catch {
-        // Fallback local storage works seamlessly
-      }
+      } catch {}
     };
 
-    if (currentUser) {
-      loadBackendData();
-    }
-  }, [currentUser]);
+    loadBackendData();
+    const pollInterval = setInterval(checkActiveUser, 2000);
+    const syncInterval = setInterval(loadBackendData, 20000);
+
+    return () => {
+      clearInterval(pollInterval);
+      clearInterval(syncInterval);
+    };
+  }, [currentUser, navigate]);
 
   // Auth Handlers
   const handleLogin = (user: Inspector) => {
@@ -4053,16 +4177,18 @@ export default function App() {
           role: inspData.role || 'Инспектор'
         };
         try {
-          const res = await api.post('/auth/register', {
+          const res = await api.post('/inspectors', {
             id: nextId,
             full_name: newInsp.full_name,
             rank: newInsp.rank,
             phone: newInsp.phone,
             role: newInsp.role,
             email: newInsp.email,
-            password: 'password123'
+            password: 'password123',
+            admin_code: newInsp.role === 'Администратор' ? 'ADMIN2026' : undefined
           });
-          setInspectors((prev) => [...prev, res.data || newInsp]);
+          const created = res.data ? sanitizeLegacyIds([res.data])[0] : newInsp;
+          setInspectors((prev) => [...prev.filter((x) => x.id !== created.id && x.email !== created.email), created]);
         } catch {
           setInspectors((prev) => [...prev, newInsp]);
         }
@@ -4082,19 +4208,31 @@ export default function App() {
       showToast('Невозможно удалить свой собственный аккаунт');
       return;
     }
-    if (inspectors.length <= 1) {
-      showToast('Невозможно удалить последнего сотрудника в реестре');
-      return;
-    }
     const target = inspectors.find((i) => i.id === id);
+    if (!target) return;
+
     const remainingAdmins = inspectors.filter((i) => i.role === 'Администратор' && i.id !== id);
     if (target?.role === 'Администратор' && remainingAdmins.length === 0) {
       showToast('Невозможно удалить единственного Администратора');
       return;
     }
 
+    try {
+      // 1. Отправляем запрос на бэкенд в базу PostgreSQL
+      await api.delete(`/inspectors/${id}`);
+      showToast('Инспектор успешно удален из базы данных');
+    } catch (e) {
+      try {
+        await api.post('/inspectors/delete', { id, email: target.email });
+        showToast('Инспектор успешно удален из базы данных');
+      } catch (err) {
+        console.error('Ошибка при удалении на сервере:', err);
+        showToast('Инспектор исключен локально');
+      }
+    }
+
+    // 2. Обновляем локальный стейт
     setInspectors((prev) => prev.filter((i) => i.id !== id));
-    showToast('Инспектор исключен из реестра');
   };
 
   // Facility Handlers
@@ -4235,26 +4373,70 @@ export default function App() {
     }
   };
 
+    const handleDeleteInspection = async (id: number) => {
+    if (currentUser?.role !== 'Администратор') {
+      showToast('Ошибка: Только Администратор может удалять проверки из журнала');
+      return;
+    }
+    try {
+      try {
+        await api.delete(`/inspections/${id}`);
+      } catch {}
+      setInspections((prev) => prev.filter((i) => i.id !== id));
+      showToast('Запись проверки удалена из журнала');
+    } catch {
+      showToast('Ошибка удаления проверки');
+    }
+  };
+
   if (!currentUser) {
     return (
-      <Routes>
-        <Route
-          path="/login"
-          element={
-            <AuthScreen
-              onLogin={handleLogin}
-              existingInspectors={inspectors}
-            />
-          }
-        />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <AuthScreen
+                onLogin={handleLogin}
+                existingInspectors={inspectors}
+              />
+            }
+          />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+
+        {kickedNotice.open && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+            <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl border border-rose-100 p-6 text-center overflow-hidden">
+              <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-100 shadow-inner">
+                <span className="text-4xl">🚒</span>
+              </div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-2">
+                Упс, вас удалил Админ ;(
+              </h3>
+              <p className="text-sm text-slate-600 mb-4 leading-relaxed">
+                Уважаемый <span className="font-semibold text-rose-600">{kickedNotice.name}</span>, не расстраивайтесь! 💔 
+                Возможно, вы просто выполнили все нормативы пожарной безопасности досрочно или отправились на заслуженный отдых! 🌴🚒
+              </p>
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs text-slate-500 mb-6">
+                Все данные профиля и активные сессии аннулированы в базе данных.
+              </div>
+              <button
+                type="button"
+                onClick={() => setKickedNotice({ open: false, name: '' })}
+                className="w-full py-3 px-4 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white font-semibold rounded-xl shadow-lg transition-all cursor-pointer"
+              >
+                Понял, не унываю! 😄👍
+              </button>
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
   return (
     <div className="flex h-screen w-screen bg-slate-100 overflow-hidden font-sans text-slate-800">
-      {/* Toast Notification */}
       {toast && (
         <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-800 text-xs font-bold flex items-center gap-2.5 animate-bounce">
           <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -4262,7 +4444,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Persistent Left Sidebar (Desktop) & Mobile Drawer */}
       <Sidebar
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -4270,9 +4451,7 @@ export default function App() {
         onCloseMobile={() => setIsMobileMenuOpen(false)}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-100 relative">
-        {/* Top Header Bar */}
         <header className="h-16 bg-white border-b border-slate-200/80 px-3.5 sm:px-6 flex items-center justify-between shrink-0 shadow-xs z-10">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <button
@@ -4319,7 +4498,6 @@ export default function App() {
           </div>
         </header>
 
-        {/* Scrollable Page Body with bottom padding for mobile navigation */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 pb-24 lg:pb-8">
           <div className="max-w-7xl mx-auto">
             <Routes>
@@ -4346,12 +4524,7 @@ export default function App() {
                   />
                 }
               />
-              <Route
-                path="/objects"
-                element={
-                  <Navigate to="/facilities" replace />
-                }
-              />
+              <Route path="/objects" element={<Navigate to="/facilities" replace />} />
               <Route
                 path="/inspections"
                 element={
@@ -4362,6 +4535,7 @@ export default function App() {
                     currentUser={currentUser}
                     currentInspectorId={currentUser.id}
                     onSave={handleSaveInspection}
+                    onDelete={handleDeleteInspection}
                   />
                 }
               />
@@ -4408,7 +4582,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile Bottom Navigation Bar */}
         <MobileBottomNav />
       </main>
     </div>

@@ -1,5 +1,6 @@
+import re
 from datetime import date as date_type
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from .models import EquipmentStatusEnum, InspectionResultEnum, RiskLevelEnum, RoleEnum
 
 class TokenPairResponse(BaseModel):
@@ -13,8 +14,31 @@ class InspectorBase(BaseModel):
     email: EmailStr
     role: RoleEnum = RoleEnum.inspector
 
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: str) -> str:
+        cleaned = v.strip()
+        parts = cleaned.split()
+        if len(parts) < 2:
+            raise ValueError('Укажите как минимум Фамилию и Имя')
+        if not re.match(r'^[А-Яа-яЁё\s\-]+$', cleaned):
+            raise ValueError('ФИО должно содержать только русские буквы и дефис')
+        return cleaned
+
 class InspectorRegister(InspectorBase):
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=8)
+    admin_code: str | None = None
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError('Пароль должен быть не менее 8 символов')
+        if not re.search(r'[A-ZА-ЯЁ]', v):
+            raise ValueError('Пароль должен содержать хотя бы одну заглавную букву')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Пароль должен содержать хотя бы одну цифру')
+        return v
 
 class InspectorOut(InspectorBase):
     id: int

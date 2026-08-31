@@ -1,32 +1,37 @@
-import hashlib
-import secrets
 from datetime import UTC, datetime, timedelta
+import hashlib
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from .config import settings
 
-pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
-ALGORITHM = 'HS256'
-
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pwd_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        pwd_bytes = plain_password.encode('utf-8')[:72]
+        return bcrypt.checkpw(pwd_bytes, hashed_password.encode('utf-8'))
+    except Exception:
+        return False
 
 def create_access_token(subject: str) -> str:
-    expire = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {'sub': subject, 'exp': expire}
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=ALGORITHM)
+    expires_delta = timedelta(minutes=settings.access_token_expire_minutes)
+    payload = {'sub': str(subject), 'exp': datetime.now(UTC) + expires_delta, 'type': 'access'}
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 def decode_access_token(token: str) -> dict:
-    return jwt.decode(token, settings.jwt_secret_key, algorithms=[ALGORITHM])
+    try:
+        return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        return {}
 
 def create_refresh_token() -> str:
-    return secrets.token_urlsafe(64)
+    return hashlib.sha256(f"{datetime.now(UTC).timestamp()}_{settings.jwt_secret_key}".encode()).hexdigest()
 
-def hash_refresh_token(raw_token: str) -> str:
-    return hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 def refresh_token_expiry() -> datetime:
     return datetime.now(UTC) + timedelta(days=settings.refresh_token_expire_days)

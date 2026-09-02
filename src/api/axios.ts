@@ -76,54 +76,16 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status === 403) {
-      window.dispatchEvent(new CustomEvent('api:forbidden'));
-      return Promise.reject(error);
-    }
-
-    if (
-      error.response?.status === 401 &&
-      originalRequest &&
-      !originalRequest._retry &&
-      !originalRequest.url?.includes('/auth/login') &&
-      !originalRequest.url?.includes('/auth/refresh')
-    ) {
-      if (isRefreshing) {
-        return new Promise<string>((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const { data } = await axios.post<{ access_token: string }>(
-          `${api.defaults.baseURL}/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
-
-        const newAccessToken = data.access_token;
-        setAccessToken(newAccessToken);
-
-        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-        processQueue(null, newAccessToken);
-
-        return api(originalRequest);
-      } catch (refreshError) {
-        processQueue(refreshError, null);
-        setAccessToken(null);
-        window.dispatchEvent(new CustomEvent('api:unauthorized'));
-        return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
-      }
+    if (error.response?.status === 401 && !originalRequest?.url?.includes("/auth/login")) {
+      window.dispatchEvent(new CustomEvent("app_error", { detail: "Сессия истекла. Авторизуйтесь заново." }));
+    } else if (error.response?.status === 403) {
+      window.dispatchEvent(new CustomEvent("app_error", { detail: "Ошибка 403: У вас нет прав для выполнения этого действия" }));
+    } else if (error.response) {
+      const data: any = error.response.data;
+      const msg = data?.detail || `Ошибка сервера: ${error.response.status}`;
+      window.dispatchEvent(new CustomEvent("app_error", { detail: typeof msg === "string" ? msg : "Ошибка сервера" }));
+    } else {
+      window.dispatchEvent(new CustomEvent("app_error", { detail: "Ошибка сети: Сервер недоступен" }));
     }
 
     return Promise.reject(error);

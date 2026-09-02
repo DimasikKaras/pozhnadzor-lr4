@@ -1,11 +1,10 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json tsconfig.json ./
 RUN npm install
 
 COPY . .
-# Сборка статики через Vite напрямую:
 RUN npx vite build
 
 FROM nginx:alpine

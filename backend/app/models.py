@@ -67,6 +67,7 @@ class Equipment(Base):
     status: Mapped[EquipmentStatusEnum] = mapped_column(Enum(EquipmentStatusEnum, name='equipment_status_enum'), nullable=False)
     last_check_date: Mapped[date] = mapped_column(Date, nullable=False)
     next_check_date: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     facility: Mapped['Facility'] = relationship(back_populates='equipment')
 
@@ -79,6 +80,7 @@ class Inspection(Base):
     date: Mapped[date] = mapped_column(Date, nullable=False)
     result: Mapped[InspectionResultEnum] = mapped_column(Enum(InspectionResultEnum, name='inspection_result_enum'), nullable=False)
     violations: Mapped[str | None] = mapped_column(Text)
+    prescription_number: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     facility: Mapped['Facility'] = relationship(back_populates='inspections')

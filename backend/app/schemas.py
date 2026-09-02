@@ -1,44 +1,23 @@
 import re
 from datetime import date as date_type
+from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from .models import EquipmentStatusEnum, InspectionResultEnum, RiskLevelEnum, RoleEnum
 
 class TokenPairResponse(BaseModel):
     access_token: str
-    token_type: str = 'bearer'
+    token_type: str = "bearer"
 
 class InspectorBase(BaseModel):
     full_name: str
     rank: str
-    phone: str | None = None
+    phone: Optional[str] = None
     email: EmailStr
     role: RoleEnum = RoleEnum.inspector
 
-    @field_validator('full_name')
-    @classmethod
-    def validate_full_name(cls, v: str) -> str:
-        cleaned = v.strip()
-        parts = cleaned.split()
-        if len(parts) < 2:
-            raise ValueError('Укажите как минимум Фамилию и Имя')
-        if not re.match(r'^[А-Яа-яЁё\s\-]+$', cleaned):
-            raise ValueError('ФИО должно содержать только русские буквы и дефис')
-        return cleaned
-
 class InspectorRegister(InspectorBase):
-    password: str = Field(min_length=8)
-    admin_code: str | None = None
-
-    @field_validator('password')
-    @classmethod
-    def validate_password_strength(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError('Пароль должен быть не менее 8 символов')
-        if not re.search(r'[A-ZА-ЯЁ]', v):
-            raise ValueError('Пароль должен содержать хотя бы одну заглавную букву')
-        if not re.search(r'[0-9]', v):
-            raise ValueError('Пароль должен содержать хотя бы одну цифру')
-        return v
+    password: str = Field(min_length=6)
+    admin_code: Optional[str] = None
 
 class InspectorOut(InspectorBase):
     id: int
@@ -50,17 +29,20 @@ class LoginRequest(BaseModel):
 
 class InspectionBase(BaseModel):
     facility_id: int
+    inspector_id: Optional[int] = None
     date: date_type
-    result: InspectionResultEnum
-    violations: str | None = None
+    result: str
+    violations: Optional[str] = ""
+    prescription_number: Optional[str] = ""
 
 class InspectionCreate(InspectionBase):
     pass
 
 class InspectionUpdate(BaseModel):
-    date: date_type | None = None
-    result: InspectionResultEnum | None = None
-    violations: str | None = None
+    date: Optional[date_type] = None
+    result: Optional[str] = None
+    violations: Optional[str] = None
+    prescription_number: Optional[str] = None
 
 class InspectionOut(InspectionBase):
     id: int
@@ -71,18 +53,18 @@ class FacilityBase(BaseModel):
     name: str
     address: str
     risk_level: RiskLevelEnum
-    cadastral_number: str | None = None
-    responsible_person: str | None = None
+    cadastral_number: Optional[str] = None
+    responsible_person: Optional[str] = None
 
 class FacilityCreate(FacilityBase):
     pass
 
 class FacilityUpdate(BaseModel):
-    name: str | None = None
-    address: str | None = None
-    risk_level: RiskLevelEnum | None = None
-    cadastral_number: str | None = None
-    responsible_person: str | None = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    risk_level: Optional[RiskLevelEnum] = None
+    cadastral_number: Optional[str] = None
+    responsible_person: Optional[str] = None
 
 class FacilityOut(FacilityBase):
     id: int
@@ -90,25 +72,42 @@ class FacilityOut(FacilityBase):
 
 class EquipmentBase(BaseModel):
     facility_id: int
-    name: str | None = None
+    name: Optional[str] = ""
     type: str
-    serial_number: str | None = None
-    status: EquipmentStatusEnum = EquipmentStatusEnum.active
-    last_check_date: date_type
-    next_check_date: date_type | None = None
+    serial_number: Optional[str] = ""
+    status: Any = "Исправен"
+    last_check_date: Any = None
+    next_check_date: Optional[Any] = None
+    notes: Optional[str] = ""
 
-class EquipmentCreate(EquipmentBase):
-    pass
+class EquipmentCreate(BaseModel):
+    facility_id: int
+    name: Optional[str] = ""
+    type: str
+    serial_number: Optional[str] = ""
+    status: Optional[str] = "Исправен"
+    last_check_date: Optional[Any] = None
+    next_check_date: Optional[Any] = None
+    notes: Optional[str] = ""
 
 class EquipmentUpdate(BaseModel):
-    facility_id: int | None = None
-    name: str | None = None
-    type: str | None = None
-    serial_number: str | None = None
-    status: EquipmentStatusEnum | None = None
-    last_check_date: date_type | None = None
-    next_check_date: date_type | None = None
+    facility_id: Optional[int] = None
+    name: Optional[str] = None
+    type: Optional[str] = None
+    serial_number: Optional[str] = None
+    status: Optional[str] = None
+    last_check_date: Optional[Any] = None
+    next_check_date: Optional[Any] = None
+    notes: Optional[str] = None
 
-class EquipmentOut(EquipmentBase):
+class EquipmentOut(BaseModel):
     id: int
+    facility_id: int
+    name: Optional[str] = ""
+    type: str
+    serial_number: Optional[str] = ""
+    status: Any = "Исправен"
+    last_check_date: Any = None
+    next_check_date: Optional[Any] = None
+    notes: Optional[str] = ""
     model_config = ConfigDict(from_attributes=True)
